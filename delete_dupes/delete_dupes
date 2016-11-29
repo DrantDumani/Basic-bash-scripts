@@ -1,0 +1,200 @@
+#!/bin/bash
+
+# create-list: create a list of regular files in a directory
+
+usage()
+{
+	cat <<- IT_ENDS
+	Usage: ${0##*/} Directory | -option
+
+	By default, searches for duplicates of files inside a specified directory and deletes them.
+	Please note that directory names may not contain spaces. 
+	Type -o to see a list of options and what they do.
+
+	IT_ENDS
+}
+
+
+options()
+{
+	cat <<- IT_ENDS
+
+	List of options:
+
+	-i: Individual folder option. Searches for duplicates of files within a single directory. 
+	If duplicates are found, then "delete_dupes" will allow you to to choose which file to delete,
+	be it the duplicate or the original.
+
+	-c: Compare option. This option allows you to compare two directories or devices. "delete_dupes"
+	will search through the first directory and then search through the second directory to look for
+	duplicates. As with the default option, any duplicates found in the 2nd directory will be deleted 
+	automatically, so exercise caution.
+
+	IT_ENDS
+}
+
+clean_up()
+{
+	[[ ! -f $tmpfile ]] || rm $tmpfile
+}
+
+dupe_loc()
+{
+	if [[ -s $tmpfile ]]; then
+		sort -uo $tmpfile $tmpfile
+		mapfile -t indexray < $tmpfile
+	else
+		echo "No duplicates were found."
+		exit 0
+	fi
+}
+
+in_folder()
+ {
+ 	read -p "Please enter a directory: " 
+
+ 	if [[ ! -d $HOME/$REPLY ]]; then
+ 		echo "Invalid entry. $HOME/$REPLY is not a directory."
+ 		exit 1
+ 	fi
+
+
+ 	echo "Searching for duplicates in $HOME/$REPLY..."
+	for i in $HOME/$REPLY/*; do
+		[[ -f $i ]] || continue
+		arr1[$i]=$(md5sum "$i" | cut -c 1-32)
+	done
+
+	local newval=0
+
+	for i in "${!arr1[@]}"; do
+		local poten="${arr1[$i]}"
+		local curr_file="${i##*/}"
+		
+		for i in "${!arr1[@]}"; do
+			if [[ "$poten" = "${arr1[$i]}" && ! "$curr_file" = "${i##*/}" ]]; then
+				
+				echo "${i##*/} is a duplicate of ${curr_file##*/}"
+				rm -iv "$i"
+				if [[ ! -f "$i" ]]; then 
+					arr1[$i]=$newval
+					newval=$((newval+1))
+				fi
+			fi
+		done
+	done
+	echo "No more duplicates found in $HOME/$REPLY."
+	exit 0
+}
+
+compare()
+{
+
+	read -p "Please enter two directories: " dir1 dir2
+
+	if [[ -d "$dir1" && -d "$dir2" ]]; then
+		echo "Searching through $dir2 for duplicates of files in $dir1..."
+	else
+		echo "Invalid entry. Please enter valid directories." >&2
+		exit 1
+	fi
+	
+	#create list of files in specified directory
+	while read -d $'\0' file; do
+		test_arr+=("$file")
+	done < <(find $dir1 -print0)
+
+	#search for all duplicate files in the home directory
+	#by name
+	#find checksum of files in specified directory
+	tmpfile=$(mktemp -p $dir1 del_logXXXXX.txt)
+
+
+	for i in "${test_arr[@]}"; do
+		Name=$(sed 's/[][?*]/\\&/g' <<< "$i")
+
+		if [[ $(find $dir2 -name "${Name##*/}" ! -wholename "$Name") ]]; then
+			[[ -f $i ]] || continue
+			find $dir2 -name "${Name##*/}" ! -wholename "$Name" >> $tmpfile
+			origray[$i]=$(md5sum "$i" | cut -c 1-32)
+		fi
+	done
+
+	#create list of duplicate file locations.
+	dupe_loc
+
+	#compare similarly named files by checksum and delete duplicates
+	local count=0
+	for i in "${!indexray[@]}"; do
+		poten=$(md5sum "${indexray[$i]}" | cut -c 1-32)
+		for i in "${!origray[@]}"; do
+			if [[ "$poten" = "${origray[$i]}" ]]; then
+				echo "${indexray[$count]} is a duplicate of a file in $dir1."
+				rm -v "${indexray[$count]}"
+				break
+			fi
+		done
+		count=$((count+1))
+	done
+	exit 0 
+}
+
+trap clean_up EXIT
+
+declare -A arr1 origray
+declare indexray test_arr
+
+case $1 in
+	-o)		options
+			exit 0
+			;;
+	-i)		in_folder
+			;;
+	-c)		compare
+			;;
+esac
+
+
+#Verify that Parameter is a directory.
+if [[ -d "$HOME/$1/" && -n "$1" ]]; then
+	echo "Searching for duplicates of files in $1..."
+else
+	usage >&2
+	exit 1
+fi
+
+#create list of files in specified directory
+ 
+
+#search for all duplicate files in the home directory
+#by name
+#find checksum of files in specified directory
+
+tmpfile=$(mktemp -p $1 del_logXXXXX.txt)
+
+for i in $HOME/${1%/}/*; do
+
+	Name=$(sed 's/[][?*]/\\&/g' <<< "$i")
+	[[ -f $i ]] || continue
+	if [[ $(find ~ -name "${Name##*/}" ! -wholename "$Name") ]]; then
+		find ~ -name "${Name##*/}" ! -wholename "$Name" >> $tmpfile
+		origray[$i]=$(md5sum "$i" | cut -c 1-32)
+	fi
+done
+
+#create list of duplicate file locations.
+dupe_loc
+
+#compare similarly named files by checksum and delete duplicates
+count=0
+for i in "${!indexray[@]}"; do
+	poten=$(md5sum "${indexray[$i]}" | cut -c 1-32)
+	for i in "${!origray[@]}"; do
+		if [[ "$poten" = "${origray[$i]}" ]]; then
+			echo "${indexray[$count]} is a duplicate of a file in $1."
+			rm -v "${indexray[$count]}"
+			break
+		fi
+	done
+	count=$((count+1))
+done
